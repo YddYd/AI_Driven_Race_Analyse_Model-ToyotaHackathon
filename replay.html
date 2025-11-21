@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Mamba Driver – Progress Curves</title>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f3f5fb;
+            color: #222;
+        }
+
+        .page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 18px 16px 40px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-size: 13px;
+            opacity: 0.8;
+            margin-bottom: 12px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+
+        .toolbar label {
+            font-size: 13px;
+            opacity: 0.8;
+        }
+
+        select {
+            background: #ffffff;
+            color: #222;
+            border-radius: 999px;
+            border: 1px solid #d0d5e5;
+            padding: 4px 10px;
+            font-size: 13px;
+        }
+
+        button {
+            border-radius: 999px;
+            border: none;
+            padding: 5px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            background: #2563eb;
+            color: white;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+        }
+
+        button:hover {
+            filter: brightness(1.05);
+        }
+
+        #plotContainer {
+            margin-top: 10px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            padding: 10px 10px 4px;
+        }
+
+        #plot {
+            width: 100%;
+            min-height: 600px;
+            /* Actual height controlled by layout.height */
+        }
+
+        .hint {
+            font-size: 11px;
+            opacity: 0.7;
+            margin-top: 2px;
+        }
+
+        .row-gap {
+            height: 6px;
+        }
+
+        input[type="range"] {
+            accent-color: #2563eb;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <h1>AI Drive Analysis Sonoma 2025 Race 1</h1>
+
+        <div class="subtitle">
+            X-axis: progress_dist. Six subplots: Steer / ΔSteer / Throttle / ΔThrottle / Brake / ΔBrake.<br>
+            Background color blocks represent corner regions (corner > 0). Corner 0 = straight, no shading.
+            Dashed vertical lines represent sector boundaries.
+        </div>
+
+        <div class="toolbar">
+            <label>Vehicle:</label>
+            <select id="vehicleSelect"></select>
+
+            <label>Lap:</label>
+            <select id="lapSelect"></select>
+
+            <button id="updateBtn">Select</button>
+        </div>
+
+        <div class="toolbar">
+            <label>Chart Height:</label>
+            <input id="heightSlider" type="range" min="600" max="1800" step="100" value="900" />
+            <span id="heightLabel" style="font-size:12px;opacity:.7;">900 px</span>
+        </div>
+
+        <div class="row-gap"></div>
+
+        <div id="plotContainer">
+            <div id="plot"></div>
+        </div>
+    </div>
+
+    <script>
+        let allRows = [];
+        let vehicles = [];
+        let laps = [];
+        let chartHeight = 900;  // adjustable via slider
+
+        const vehicleSelect = document.getElementById("vehicleSelect");
+        const lapSelect = document.getElementById("lapSelect");
+        const updateBtn = document.getElementById("updateBtn");
+        const heightSlider = document.getElementById("heightSlider");
+        const heightLabel = document.getElementById("heightLabel");
+
+        heightLabel.textContent = chartHeight + " px";
+
+        heightSlider.oninput = function () {
+            chartHeight = parseInt(this.value, 10) || 900;
+            heightLabel.textContent = chartHeight + " px";
+            Plotly.relayout("plot", { height: chartHeight });
+        };
+
+        // ============ Load CSV ============
+        (function loadCsv() {
+            const url = "model_output.csv";
+            console.log("Loading CSV:", url);
+
+            fetch(url)
+                .then(resp => {
+                    console.log("HTTP Status:", resp.status, resp.statusText);
+                    if (!resp.ok) throw new Error("HTTP " + resp.status + " " + resp.statusText);
+                    return resp.text();
+                })
+                .then(text => {
+                    const lines = text.replace(/\r/g, "").split("\n");
+                    const headerLine = lines[0];
+                    if (!headerLine) throw new Error("CSV header missing.");
+
+                    const headers = headerLine.split(",");
+                    console.log("CSV Headers:", headers);
+
+                    allRows = lines.slice(1).filter(Boolean).map(line => {
+                        const cols = line.split(",");
+                        const obj = {};
+                        headers.forEach((h, i) => {
+                            obj[h] = cols[i];
+                        });
+
+                        // Data parsing
+                        obj.progress = parseFloat(obj.progress_dist);
+                        obj.steer = parseFloat(obj.Steering_smooth);
+                        obj.predSteer = parseFloat(obj.pred_steer);
+                        obj.diffSteer = parseFloat(obj.diff_steer);
+
+                        obj.thr = parseFloat(obj.ath_smooth);
+                        obj.predThr = parseFloat(obj.pred_ath);
+                        obj.diffThr = parseFloat(obj.diff_ath);
+
+                        obj.brk = parseFloat(obj.pbrake_f_smooth);
+                        obj.predBrk = parseFloat(obj.pred_brk);
+                        obj.diffBrk = parseFloat(obj.diff_brk);
+
+                        obj.vehicle = obj.vehicle_id || "";
+                        obj.lapStr = (obj.lap !== undefined) ? String(obj.lap) : "";
+                        obj.corner = parseInt(obj.corner_index || obj.corner || "0", 10);
+                        obj.sector = parseInt(obj.sector_index || obj.sector || "0", 10);
+
+                        return obj;
+                    });
+
+                    console.log("Parsed rows:", allRows.length);
+
+                    initSelectors();
+                    updatePlot();
+                })
+                .catch(err => {
+                    console.error("CSV load/parse error:", err);
+                    alert("Failed to load/parse model_output.csv. See console for details.");
+                });
+        })();
+
+        // ============ Initialize Selectors ============
+        function initSelectors() {
+            vehicles = Array.from(new Set(allRows.map(r => r.vehicle).filter(v => v !== "")));
+            laps = Array.from(new Set(allRows.map(r => r.lapStr).filter(l => l !== "")));
+
+            vehicleSelect.innerHTML = "";
+            vehicles.forEach((v, idx) => {
+                const opt = document.createElement("option");
+                opt.value = v;
+                opt.textContent = v;
+                if (idx === 0) opt.selected = true;
+                vehicleSelect.appendChild(opt);
+            });
+
+            const optAllVeh = document.createElement("option");
+            optAllVeh.value = "all";
+            optAllVeh.textContent = "All Vehicles";
+            vehicleSelect.appendChild(optAllVeh);
+
+            lapSelect.innerHTML = "";
+            laps.forEach((l, idx) => {
+                const opt = document.createElement("option");
+                opt.value = l;
+                opt.textContent = l;
+                if (idx === 0) opt.selected = true;
+                lapSelect.appendChild(opt);
+            });
+
+            const optAllLap = document.createElement("option");
+            optAllLap.value = "all";
+            optAllLap.textContent = "All Laps";
+            lapSelect.appendChild(optAllLap);
+
+            updateBtn.onclick = updatePlot;
+        }
+
+        // ============ Build corner regions ============
+        function buildCornerRegions(subset) {
+            const regions = [];
+            if (!subset.length) return regions;
+
+            let currentCorner = subset[0].corner;
+            let startProg = subset[0].progress;
+
+            for (let i = 1; i < subset.length; i++) {
+                const r = subset[i];
+                if (!isFinite(r.progress)) continue;
+
+                if (r.corner !== currentCorner) {
+                    regions.push({ corner: currentCorner, x0: startProg, x1: r.progress });
+                    currentCorner = r.corner;
+                    startProg = r.progress;
+                }
+            }
+
+            regions.push({
+                corner: currentCorner,
+                x0: startProg,
+                x1: subset[subset.length - 1].progress
+            });
+
+            return regions;
+        }
+
+        // ============ Build sector boundaries ============
+        function buildSectorBounds(subset) {
+            const bounds = [];
+            if (!subset.length) return bounds;
+
+            let currentSector = subset[0].sector;
+
+            for (let i = 1; i < subset.length; i++) {
+                const r = subset[i];
+                if (!isFinite(r.progress)) continue;
+
+                if (r.sector !== currentSector) {
+                    bounds.push({ from: currentSector, to: r.sector, x: r.progress });
+                    currentSector = r.sector;
+                }
+            }
+
+            return bounds;
+        }
+
+        // ============ Main Plotting Function ============
+        function updatePlot() {
+            const selVehicle = vehicleSelect.value;
+            const selLap = lapSelect.value;
+
+            let subset = allRows.filter(r => {
+                const vehicleOK = (selVehicle === "all") || (r.vehicle === selVehicle);
+                const lapOK = (selLap === "all") || (r.lapStr === selLap);
+                return vehicleOK && lapOK && isFinite(r.progress);
+            });
+
+            subset.sort((a, b) => a.progress - b.progress);
+
+            if (!subset.length) {
+                Plotly.purge("plot");
+                alert("No data for this selection.");
+                return;
+            }
+
+            // Downsample if too large
+            const maxPoints = 4000;
+            if (subset.length > maxPoints) {
+                const step = Math.ceil(subset.length / maxPoints);
+                subset = subset.filter((_, idx) => idx % step === 0);
+            }
+
+            const x = subset.map(r => r.progress);
+
+            const steerReal = subset.map(r => isFinite(r.steer) ? r.steer : null);
+            const steerPred = subset.map(r => isFinite(r.predSteer) ? r.predSteer : null);
+            const diffSteer = subset.map(r => isFinite(r.diffSteer) ? r.diffSteer : null);
+
+            const thrReal = subset.map(r => isFinite(r.thr) ? r.thr : null);
+            const thrPred = subset.map(r => isFinite(r.predThr) ? r.predThr : null);
+            const diffThr = subset.map(r => isFinite(r.diffThr) ? r.diffThr : null);
+
+            const brkReal = subset.map(r => isFinite(r.brk) ? r.brk : null);
+            const brkPred = subset.map(r => isFinite(r.predBrk) ? r.predBrk : null);
+            const diffBrk = subset.map(r => isFinite(r.diffBrk) ? r.diffBrk : null);
+
+            const xMin = Math.min(...x);
+            const xMax = Math.max(...x);
+
+            // Corner region shading
+            const regions = buildCornerRegions(subset);
+            const sectorBounds = buildSectorBounds(subset);
+
+            const cornerColors = [
+                "rgba(255, 183, 183, 0.25)",
+                "rgba(255, 223, 186, 0.25)",
+                "rgba(255, 249, 196, 0.25)",
+                "rgba(204, 232, 204, 0.25)",
+                "rgba(197, 226, 255, 0.25)",
+                "rgba(220, 198, 255, 0.25)",
+                "rgba(255, 204, 229, 0.25)"
+            ];
+
+            const shapes = [];
+
+            regions.forEach(r => {
+                if (!isFinite(r.corner) || r.corner <= 0) return;
+                const idx = (Math.abs(r.corner - 1)) % cornerColors.length;
+                shapes.push({
+                    type: "rect",
+                    xref: "x",
+                    yref: "paper",
+                    x0: r.x0,
+                    x1: r.x1,
+                    y0: 0,
+                    y1: 1,
+                    fillcolor: cornerColors[idx],
+                    line: { width: 0 }
+                });
+            });
+
+            sectorBounds.forEach(b => {
+                shapes.push({
+                    type: "line",
+                    xref: "x",
+                    yref: "paper",
+                    x0: b.x,
+                    x1: b.x,
+                    y0: 0,
+                    y1: 1,
+                    line: {
+                        width: 1,
+                        dash: "dot",
+                        color: "rgba(107,114,128,0.9)"
+                    }
+                });
+            });
+
+            const traces = [
+                { x, y: steerReal, name: "True Steering", mode: "lines", line: { width: 1.5 }, yaxis: "y1" },
+                { x, y: steerPred, name: "Pred Steering", mode: "lines", line: { width: 1, dash: "dot" }, yaxis: "y1" },
+
+                { x, y: diffSteer, name: "Δ Steering (pred - true)", mode: "lines", line: { width: 1 }, yaxis: "y2" },
+
+                { x, y: thrReal, name: "True Throttle", mode: "lines", line: { width: 1.5 }, yaxis: "y3" },
+                { x, y: thrPred, name: "Pred Throttle", mode: "lines", line: { width: 1, dash: "dot" }, yaxis: "y3" },
+
+                { x, y: diffThr, name: "Δ Throttle (pred - true)", mode: "lines", line: { width: 1 }, yaxis: "y4" },
+
+                { x, y: brkReal, name: "True Brake_f", mode: "lines", line: { width: 1.5 }, yaxis: "y5" },
+                { x, y: brkPred, name: "Pred Brake_f", mode: "lines", line: { width: 1, dash: "dot" }, yaxis: "y5" },
+
+                { x, y: diffBrk, name: "Δ Brake_f (pred - true)", mode: "lines", line: { width: 1 }, yaxis: "y6" }
+            ];
+
+            const layout = {
+                margin: { l: 60, r: 20, t: 20, b: 40 },
+                paper_bgcolor: "#ffffff",
+                plot_bgcolor: "#ffffff",
+                showlegend: true,
+                legend: { orientation: "h", x: 0, y: 1.08 },
+                dragmode: "zoom",
+                height: chartHeight,
+                xaxis: {
+                    title: "progress_dist",
+                    type: "linear",
+                    range: [xMin, xMax],
+                    showgrid: false,
+                    side: "top",   // move ticks & labels to the top
+                    anchor: "y1"   // keep it anchored to the first (top) subplot
+                },
+                yaxis: { title: "Steer", domain: [0.83, 1.00], showgrid: true, fixedrange: true },
+                yaxis2: { title: "ΔSteer", domain: [0.66, 0.83], showgrid: true, fixedrange: true },
+                yaxis3: { title: "Throttle", domain: [0.49, 0.66], showgrid: true, fixedrange: true },
+                yaxis4: { title: "ΔThrottle", domain: [0.32, 0.49], showgrid: true, fixedrange: true },
+                yaxis5: { title: "Brake_f", domain: [0.15, 0.32], showgrid: true, fixedrange: true },
+                yaxis6: { title: "ΔBrake_f", domain: [0.00, 0.15], showgrid: true, fixedrange: true },
+                shapes: shapes
+            };
+
+            Plotly.newPlot("plot", traces, layout, { responsive: true });
+        }
+    </script>
+</body>
+
+</html>
