@@ -48,8 +48,6 @@ Contains cleaned telemetry:
 - speed, steering, throttle, brake  
 - timestamps, gear, RPM  
 - computed progress_dist  
-- auto-generated corner_index  
-- smoothed control inputs
 
 ### **model_output.csv**
 Contains all telemetry **plus AI predictions**:
