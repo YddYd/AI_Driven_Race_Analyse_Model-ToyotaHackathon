@@ -21,7 +21,7 @@ python -m http.server 8000
 Then open your browser and go to:
 
 ```
-http://localhost:8000/replay.html
+http://localhost:8000/index.html
 ```
 
 This solves all CSV loading + CORS issues.
@@ -56,7 +56,7 @@ Contains all telemetry **plus AI predictions**:
 - corner / sector alignment  
 Used directly by `replay.html`.
 
-### **replay.html**
+### **index.html**
 Interactive lap analyzer that displays:
 - Steering / Throttle / Brake comparison  
 - Δ(input) visualizations  
@@ -94,7 +94,7 @@ python -m http.server 8000
 Then open:
 
 ```
-http://localhost:8000/replay.html
+http://localhost:8000/index.html
 ```
 
 Alternative port:
